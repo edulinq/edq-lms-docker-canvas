@@ -35,6 +35,9 @@ RUN \
         software-properties-common \
         unzip \
         wget \
+        # Python \
+        python3 \
+        python3-pip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -84,6 +87,10 @@ RUN \
     && make \
     && make install \
     && rm -rf /work/ruby*
+
+# Install Python Dependencies
+COPY ./requirements.txt /work/
+RUN pip3 install -r /work/requirements.txt
 
 # Setup Postgres
 RUN \
@@ -145,16 +152,21 @@ RUN \
     && service postgresql stop
 
 # Copy Scripts
+COPY ./data /work/data
 COPY ./scripts /work/scripts
 
 # Populate with test data.
 RUN \
     # Start DB \
     service postgresql start \
+    # Start Server \
+    && bundle exec rails server -d \
     # Load in data necessary to load the rest of the data.
     && bash /work/scripts/load-pre-data.sh \
     # Load the main data.
     && python3 /work/scripts/load-data.py \
+    # Stop Server \
+    && pgrep -f puma | xargs kill \
     # Stop DB \
     && service postgresql stop
 
