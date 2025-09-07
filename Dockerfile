@@ -147,4 +147,15 @@ RUN \
 # Copy Scripts
 COPY ./scripts /work/scripts
 
+# Populate with test data.
+RUN \
+    # Start DB \
+    service postgresql start \
+    # Load in data necessary to load the rest of the data.
+    && bash /work/scripts/load-pre-data.sh \
+    # Load the main data.
+    && python3 /work/scripts/load-data.py \
+    # Stop DB \
+    && service postgresql stop
+
 ENTRYPOINT ["/work/scripts/entrypoint.sh"]
