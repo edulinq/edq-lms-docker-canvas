@@ -24,6 +24,15 @@ DEFAULT_HEADERS = {
     "Accept": "application/json+canvas-string-ids",
 }
 
+# See: https://developerdocs.instructure.com/services/canvas/resources/enrollments#enrollment
+COURSE_ROLE_ENROLLMENT_MAP = {
+    'other': 'ObserverEnrollment',
+    'student': 'StudentEnrollment',
+    'grader': 'TaEnrollment',
+    'admin': 'TaEnrollment',
+    'owner': 'TeacherEnrollment',
+}
+
 def make_canvas_post(endpoint, data = None, headers = None, json_body = True):
     if (data is None):
         data = {}
@@ -49,19 +58,15 @@ def make_canvas_post(endpoint, data = None, headers = None, json_body = True):
 
     return response, body
 
-def add_users():
-    with open(USERS_FILE, 'r') as file:
-        users = json.load(file)
-
-    # {name: {'account_id': account_id, 'user_id': user_id}, ...}
-    users_info = {
-        'server-owner': {
-            'account_id': SERVER_OWNER_ACCOUNT_ID,
-            'user_id': SERVER_OWNER_USER_ID,
-        },
+# Add users to canvas and add a 'canvas' dict to users that has 'account_id' and 'user_id'.
+def add_users(users):
+    # Add in the server owner's info manually.
+    users['server-owner']['canvas'] = {
+        'account_id': SERVER_OWNER_ACCOUNT_ID,
+        'user_id': SERVER_OWNER_USER_ID,
     }
 
-    for user in users:
+    for user in users.values():
         name = user['name']
         email = user['email']
 
@@ -97,24 +102,17 @@ def add_users():
         _, response_data = make_canvas_post(f"accounts/{account_id}/users", data = data)
         user_id = response_data['id']
 
-        # Store the user info.
-        users_info[name] = {
+        # Store the canvas info.
+        user['canvas'] = {
             'account_id': account_id,
             'user_id': user_id,
         }
 
-    return users_info
+# Add courses (not erollments) to canvas and add a 'canvas' dict to courses that has 'course_id'.
+def add_courses(courses, users):
+    account_id = users['course-owner']['canvas']['account_id']
 
-def add_courses(users_info):
-    with open(COURSES_FILE, 'r') as file:
-        courses = json.load(file)
-
-    account_id = users_info['course-owner']['account_id']
-
-    # {course_id: canvas_course_id, ...}
-    course_ids = {}
-
-    for course in courses:
+    for course in courses.values():
         data = {
             'course[name]': course['name'],
             'course[course_code]': course['id'],
@@ -135,13 +133,45 @@ def add_courses(users_info):
         _, response_data = make_canvas_post(f"accounts/{account_id}/courses", data = data)
         course_id = response_data['id']
 
-        course_ids[course['id']] = course_id
+        course['canvas'] = {'course_id': course_id}
 
-    return course_ids
+def add_enrollments(courses, users):
+    for user in users.values():
+        for (course_id, enrollment_info) in user.get('course-info', {}).items():
+            role = enrollment_info['role']
+
+            data = {
+                'enrollment[user_id]': user['canvas']['user_id'],
+                'enrollment[type]': COURSE_ROLE_ENROLLMENT_MAP[role],
+                'enrollment[enrollment_state]': 'active',
+                'enrollment[limit_privileges_to_course_section]': False,
+                'enrollment[notify]': False,
+            }
+
+            canvas_course_id = courses[course_id]['canvas']['course_id']
+            make_canvas_post(f"courses/{canvas_course_id}/enrollments", data = data)
+
+# Load the data from disk into a dict, key by name (users) or id (courses).
+def load_test_data():
+    with open(USERS_FILE, 'r') as file:
+        raw_users = json.load(file)
+
+    with open(COURSES_FILE, 'r') as file:
+        raw_courses = json.load(file)
+
+    # Transform the data from an array into a dict (keyed by name/id).
+
+    users = {user['name']: user for user in raw_users}
+    courses = {course['id']: course for course in raw_courses}
+
+    return users, courses
 
 def main():
-    users_info = add_users()
-    course_ids = add_courses(users_info)
+    users, courses = load_test_data()
+
+    add_users(users)
+    add_courses(courses, users)
+    add_enrollments(courses, users)
 
     return 0
 
