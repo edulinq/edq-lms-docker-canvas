@@ -10,6 +10,7 @@ THIS_DIR = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
 DATA_DIR = os.path.join(THIS_DIR, '..', 'data')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 COURSES_FILE = os.path.join(DATA_DIR, 'courses.json')
+ASSIGNMENTS_FILE = os.path.join(DATA_DIR, 'assignments.json')
 
 TOKEN = 'CKa4QeVkC9ZL3aUGQ2kUvtVKnUaBrCuXAvMYNcL34mxMLkc9UrmttFR924FFMRXY'
 SERVER = 'http://127.0.0.1:3000'
@@ -31,6 +32,11 @@ COURSE_ROLE_ENROLLMENT_MAP = {
     'grader': 'TaEnrollment',
     'admin': 'TaEnrollment',
     'owner': 'TeacherEnrollment',
+}
+
+# See: https://developerdocs.instructure.com/services/canvas/resources/assignments#assignment
+ASSIGNMENT_SUBMISSION_TYPE_MAP = {
+    'autograder': 'none',
 }
 
 def make_canvas_post(endpoint, data = None, headers = None, json_body = True):
@@ -151,6 +157,32 @@ def add_enrollments(courses, users):
             canvas_course_id = courses[course_id]['canvas']['course_id']
             make_canvas_post(f"courses/{canvas_course_id}/enrollments", data = data)
 
+def add_assignments(assignments, courses):
+    for (course_id, course_assignments) in assignments.items():
+        for assignment in course_assignments:
+            data = {
+                'assignment[name]': assignment['name'],
+                'assignment[submission_types][]': ASSIGNMENT_SUBMISSION_TYPE_MAP[assignment['type']],
+                'assignment[turnitin_enabled]': False,
+                'assignment[vericite_enabled]': False,
+                'assignment[peer_reviews]': False,
+                'assignment[automatic_peer_reviews]': False,
+                'assignment[notify_of_update]': False,
+                'assignment[points_possible]': assignment['max-points'],
+                'assignment[allowed_attempts]': -1,
+                'assignment[grading_type]': 'points',
+                'assignment[only_visible_to_overrides]': False,
+                'assignment[published]': True,
+                'assignment[quiz_lti]': False,
+                'assignment[moderated_grading]': False,
+                'assignment[omit_from_final_grade]': False,
+                # For some reason, hide_in_gradebook gives a 400.
+                # 'assignment[hide_in_gradebook]': False,
+            }
+
+            canvas_course_id = courses[course_id]['canvas']['course_id']
+            make_canvas_post(f"courses/{canvas_course_id}/assignments", data = data)
+
 # Load the data from disk into a dict, key by name (users) or id (courses).
 def load_test_data():
     with open(USERS_FILE, 'r') as file:
@@ -159,19 +191,23 @@ def load_test_data():
     with open(COURSES_FILE, 'r') as file:
         raw_courses = json.load(file)
 
+    with open(ASSIGNMENTS_FILE, 'r') as file:
+        assignments = json.load(file)
+
     # Transform the data from an array into a dict (keyed by name/id).
 
     users = {user['name']: user for user in raw_users}
     courses = {course['id']: course for course in raw_courses}
 
-    return users, courses
+    return users, courses, assignments
 
 def main():
-    users, courses = load_test_data()
+    users, courses, assignments = load_test_data()
 
     add_users(users)
     add_courses(courses, users)
     add_enrollments(courses, users)
+    add_assignments(assignments, courses)
 
     return 0
 

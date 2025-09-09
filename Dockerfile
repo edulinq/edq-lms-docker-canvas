@@ -163,8 +163,8 @@ RUN \
     && bundle exec rails server -d \
     # Load in data necessary to load the rest of the data.
     && bash /work/scripts/load-pre-data.sh \
-    # Load the main data.
-    && python3 /work/scripts/load-data.py \
+    # Load the main data, cat the log on failure.
+    && (python3 /work/scripts/load-data.py || (cat /work/canvas-source/log/development.log && false)) \
     # Stop Server \
     && pgrep -f puma | xargs kill \
     # Stop DB \
