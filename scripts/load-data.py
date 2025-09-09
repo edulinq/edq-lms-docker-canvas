@@ -11,6 +11,7 @@ DATA_DIR = os.path.join(THIS_DIR, '..', 'data')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 COURSES_FILE = os.path.join(DATA_DIR, 'courses.json')
 ASSIGNMENTS_FILE = os.path.join(DATA_DIR, 'assignments.json')
+SUBMISSIONS_FILE = os.path.join(DATA_DIR, 'submissions.json')
 
 TOKEN = 'CKa4QeVkC9ZL3aUGQ2kUvtVKnUaBrCuXAvMYNcL34mxMLkc9UrmttFR924FFMRXY'
 SERVER = 'http://127.0.0.1:3000'
@@ -40,6 +41,12 @@ ASSIGNMENT_SUBMISSION_TYPE_MAP = {
 }
 
 def make_canvas_post(endpoint, data = None, headers = None, json_body = True):
+    return make_canvas_request(endpoint, data = data, headers = headers, json_body = json_body, requests_function = requests.post)
+
+def make_canvas_put(endpoint, data = None, headers = None, json_body = True):
+    return make_canvas_request(endpoint, data = data, headers = headers, json_body = json_body, requests_function = requests.put)
+
+def make_canvas_request(endpoint, data = None, headers = None, json_body = True, requests_function = requests.post):
     if (data is None):
         data = {}
 
@@ -53,7 +60,7 @@ def make_canvas_post(endpoint, data = None, headers = None, json_body = True):
 
     url = f"{SERVER}/{API_BASE}/{endpoint}"
 
-    response = requests.post(url, headers = headers, data = data)
+    response = requests_function(url, headers = headers, data = data)
     response.raise_for_status()
 
     body = None
@@ -157,9 +164,10 @@ def add_enrollments(courses, users):
             canvas_course_id = courses[course_id]['canvas']['course_id']
             make_canvas_post(f"courses/{canvas_course_id}/enrollments", data = data)
 
+# Add assignments to courses and add a 'canvas' dict to assignments that has 'assignment_id'.
 def add_assignments(assignments, courses):
     for (course_id, course_assignments) in assignments.items():
-        for assignment in course_assignments:
+        for assignment in course_assignments.values():
             data = {
                 'assignment[name]': assignment['name'],
                 'assignment[submission_types][]': ASSIGNMENT_SUBMISSION_TYPE_MAP[assignment['type']],
@@ -181,9 +189,30 @@ def add_assignments(assignments, courses):
             }
 
             canvas_course_id = courses[course_id]['canvas']['course_id']
-            make_canvas_post(f"courses/{canvas_course_id}/assignments", data = data)
+            _, response_data = make_canvas_post(f"courses/{canvas_course_id}/assignments", data = data)
+            canvas_assignment_id = response_data['id']
 
-# Load the data from disk into a dict, key by name (users) or id (courses).
+            assignment['canvas'] = {'assignment_id': canvas_assignment_id}
+
+def add_submissions(users, courses, assignments, submissions):
+    for submission in submissions:
+        canvas_course_id = courses[submission['course-id']]['canvas']['course_id']
+        canvas_assignment_id = assignments[submission['course-id']][submission['assignment-id']]['canvas']['assignment_id']
+        canvas_user_id = users[submission['user'].split('@')[0]]['canvas']['user_id']
+
+        data = {
+            'submission[posted_grade]': submission['score'],
+            'comment[text_comment]': submission['id'],
+            'include[visibility]': True,
+        }
+
+        make_canvas_put(f"courses/{canvas_course_id}/assignments/{canvas_assignment_id}/submissions/{canvas_user_id}", data = data)
+
+# Load the data from disk into a dict, and arrange the data in dicts keyed as follows:
+# - users: dict keyed by name,
+# - courses: dict keyed by id,
+# - assignments: dict keyed by course id then assignment id,
+# - submissions: list.
 def load_test_data():
     with open(USERS_FILE, 'r') as file:
         raw_users = json.load(file)
@@ -192,22 +221,30 @@ def load_test_data():
         raw_courses = json.load(file)
 
     with open(ASSIGNMENTS_FILE, 'r') as file:
-        assignments = json.load(file)
+        raw_assignments = json.load(file)
 
-    # Transform the data from an array into a dict (keyed by name/id).
+    with open(SUBMISSIONS_FILE, 'r') as file:
+        submissions = json.load(file)
+
+    # Transform the data from a list into a dict.
 
     users = {user['name']: user for user in raw_users}
     courses = {course['id']: course for course in raw_courses}
 
-    return users, courses, assignments
+    assignments = {}
+    for (course_id, course_assignments) in raw_assignments.items():
+        assignments[course_id] = {course_assignment['id']: course_assignment for course_assignment in course_assignments}
+
+    return users, courses, assignments, submissions
 
 def main():
-    users, courses, assignments = load_test_data()
+    users, courses, assignments, submissions = load_test_data()
 
     add_users(users)
     add_courses(courses, users)
     add_enrollments(courses, users)
     add_assignments(assignments, courses)
+    add_submissions(users, courses, assignments, submissions)
 
     return 0
 
